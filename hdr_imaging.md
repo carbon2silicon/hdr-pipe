@@ -229,3 +229,4 @@ The result is a sensor that captures 14–17 stops of dynamic range from a singl
 - [Debevec & Malik (1997)](https://www.cs.princeton.edu/courses/archive/fall14/cos526/papers/debevec97.pdf)
 - [Burst Photography for High Dynamic Range and Low-Light Imaging on Mobile Cameras](https://static.googleusercontent.com/media/hdrplusdata.org/en//hdrplus.pdf)
 - [How camera ISO works](https://www.youtube.com/watch?v=iiMfAmWbWSg)
+- [Dual gain ISO](https://www.youtube.com/watch?v=8hpZY_WGpNY)
