@@ -3,23 +3,23 @@
 A modern camera can't capture a sunlit street and a shadowed alley in the same frame — the physics won't allow it. High Dynamic Range (HDR) imaging is the set of techniques, from sensor design to software, that work around that limit. This post traces the problem from first principles — how a photosite works, why dynamic range is finite, and why small pixels make it worse — then walks through three distinct engineering solutions: Debevec's multi-exposure bracketing, Google's burst-merge approach in HDR+, and ARRI's dual-gain sensor for video.
 
 ## Sections
-1. [How cameras work?](#how-hdr-images-and-videos-are-captured)
-2. [Dynamic Range](#dynamic-range)
-3. [The low-light problem on mobile cameras](#the-low-light-problem-on-mobile-cameras)
-4. [Capturing an HDR image: Debevec's approach](#capturing-an-hdr-image-debevecs-approach)
-5. [Google HDR+: burst photography at constant EV](#google-hdr-burst-photography-at-constant-ev)
+1. [How cameras work](#how-cameras-work)
+2. [Exposure Value (EV) and ISO](#exposure-value-ev-and-iso)
+3. [Dynamic Range](#dynamic-range)
+4. [The low-light problem on mobile cameras](#the-low-light-problem-on-mobile-cameras)
+5. [Capturing an HDR image: Debevec's approach](#capturing-an-hdr-image-debevecs-approach)
+6. [Google HDR+: burst photography at constant EV](#google-hdr-burst-photography-at-constant-ev)
    - [Noise averaging: the math](#noise-averaging-the-math)
    - [The underexposure strategy](#the-underexposure-strategy)
    - [Auto-exposure](#auto-exposure-how-google-decides-how-much-to-underexpose)
-6. [Capturing an HDR video](#capturing-an-hdr-video)
-   - [What ISO actually is](#what-iso-actually-is)
+7. [Capturing an HDR video](#capturing-an-hdr-video)
    - [ARRI's solution: large photosites and dual gain readout](#arris-solution-large-photosites-and-dual-gain-readout)
    - [How this reaches 17 stops](#how-this-reaches-17-stops)
-7. [Resources](#resources)
+8. [Resources](#resources)
 
 ---
 
-## How camers work?
+## How cameras work
 At each pixel within a camera, light arrives as a stream of photons. This photon flux hits a silicon photodiode, and each absorbed photon frees an electron inside the silicon, generating charge. These electrons collect in a potential well, where they're converted to a voltage, and that voltage is then quantized and stored. There are noises and optimizations at every stage, but this is the crux of how a camera captures scene information — and it's essentially what your .raw file contains.
 
 ![photons](blog_imgs/photons2electrons.png)
@@ -30,6 +30,24 @@ The potential well is the heart of it. Every photosite can hold only so many ele
 
 
 ![img](blog_imgs/aperture.jpeg)
+
+## Exposure Value (EV) and ISO
+
+Aperture and shutter speed are two separate physical controls, but a camera needs a single number to describe how much light is reaching the sensor. That number is the **Exposure Value (EV)**:
+
+$$
+EV = \log_2 \frac{N^2}{t}
+$$
+
+where $N$ is the f-number and $t$ is the shutter speed in seconds, at a reference sensitivity of ISO 100. Each +1 EV halves the light (smaller aperture or faster shutter); each −1 EV doubles it.
+
+**ISO** is the third exposure control — the electronic gain applied to the signal after the potential well is read out. It doesn't change the physics of how many photons hit the sensor; it amplifies the resulting voltage before digitization. A higher ISO makes dim scenes recordable, but it amplifies noise in equal measure. Factoring ISO in, the adjusted EV is:
+
+$$
+EV_{\text{adj}} = \log_2 \frac{N^2}{t} - \log_2 \frac{\text{ISO}}{100}
+$$
+
+A higher ISO lowers the EV needed to achieve a given brightness — the sensor is effectively more sensitive. We'll return to what ISO does at the hardware level in the video section, where it becomes central to understanding HDR video capture.
 
 Here's the trap: EV is one global setting for the entire frame. A scene with both a bright sky and deep shade forces a choice. Expose for the sky and the shadows fall into noise; expose for the shadows and the sky blows out. A single exposure can't hold both ends at once.
 
@@ -69,7 +87,7 @@ The obvious hardware fix is a wider aperture — more photons per unit time. But
 
 ## Capturing an HDR image: Debevec's approach
 
-My iPhone 13 mini has EV settings from -2 to 2, meaning it can slide through about 10 stops of dynamic range by adjusting exposure. One approach to capturing a scene wider than 10 stops is to shoot the same scene multiple times at different EVs — short exposure for the highlights, long exposure for the shadows — and merge them into a single radiance map.
+My iPhone 13 mini's sensor captures roughly 10 stops of dynamic range in a single frame. Its exposure compensation range of −2 to +2 EV lets you shift that 10-stop window up or down by 4 stops — protect highlights at the cost of darker shadows, or vice versa — but the window stays 10 stops wide regardless. One approach to capturing a scene wider than 10 stops is to shoot the same scene multiple times at different EVs — short exposure for the highlights, long exposure for the shadows — and merge them into a single radiance map.
 
 [Debevec & Malik (1997)](https://www.cs.princeton.edu/courses/archive/fall14/cos526/papers/debevec97.pdf) were among the first to formalise this. Their method recovers the inverse camera response function — the mapping from 8-bit output values back to physical scene radiance — and then uses a weighted average across exposures so that each region of the image is contributed mostly by the frame where it was best exposed (not clipped, not in noise). The result is a linear HDR radiance map of the scene.
 
@@ -150,9 +168,9 @@ At 24 fps you have **40 ms per frame** — that's your entire budget for capture
 
 The problem then becomes: how do you capture 17+ stops of dynamic range from a single 40 ms window?
 
-### What ISO actually is
+### What ISO actually is at the hardware level
 
-To understand ARRI's solution you first need to understand what ISO does at the hardware level, because the solution is built around manipulating it.
+We introduced ISO as electronic gain applied after readout. To understand ARRI's solution, we need to go one level deeper — into exactly what that amplifier does, and why you can't simply turn it up to capture everything.
 
 After photons hit the photosite and electrons accumulate in the potential well, the charge is converted to a voltage and sent to an **amplifier** before it reaches the analog-to-digital converter (ADC). ISO is the gain setting of that amplifier.
 

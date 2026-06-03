@@ -13,6 +13,9 @@ dependencies = [
     "scipy>=1.13.0",
     "imageio[pyav]>=2.36.0",
     "nbformat>=5.10.0",
+    "rawpy>=0.27.0",
+    "opencv-python>=4.13.0.92",
+    "torch>=2.6.0",
 ]
 
 [project.optional-dependencies]
@@ -67,6 +70,7 @@ explicit = true
 name = "pytorch-cuda"
 url = "https://download.pytorch.org/whl/cu124"
 explicit = true
+
 
 [build-system]
 requires = ["hatchling"]
