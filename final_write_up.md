@@ -1,8 +1,30 @@
-# SDR & HDR - The physics behind light
+# How HDR images and videos are captured
 
-while i'm at invideo.ai, both @dataBiryani and @_anshulk introduced me to this problem of converting a SDR video to HDR, though we started with initial work on this, we couldn't take it forward on time and deprioritised this work for other things. Now after 6 months watching LTX release these models I kind of thought i will write about our initial research on the same topic. Let's start.
+A modern camera can't capture a sunlit street and a shadowed alley in the same frame — the physics won't allow it. High Dynamic Range (HDR) imaging is the set of techniques, from sensor design to software, that work around that limit. This post traces the problem from first principles — how a photosite works, why dynamic range is finite, and why small pixels make it worse — then walks through three distinct engineering solutions: Debevec's multi-exposure bracketing, Google's burst-merge approach in HDR+, and ARRI's dual-gain sensor for video.
 
-To understand the difference between SDR and HDR we need to understand how camera's work. At each pixel within a camera, light arrives as a stream of photons. This photon flux hits a silicon photodiode, and each absorbed photon frees an electron inside the silicon, generating charge. These electrons collect in a potential well, where they're converted to a voltage, and that voltage is then quantized and stored. There are noises and optimizations at every stage, but this is the crux of how a camera captures scene information — and it's essentially what your .raw file contains.
+## Sections
+1. [How cameras work?](#how-hdr-images-and-videos-are-captured)
+2. [Dynamic Range](#dynamic-range)
+3. [The low-light problem on mobile cameras](#the-low-light-problem-on-mobile-cameras)
+4. [Capturing an HDR image: Debevec's approach](#capturing-an-hdr-image-debevecs-approach)
+5. [Google HDR+: burst photography at constant EV](#google-hdr-burst-photography-at-constant-ev)
+   - [Noise averaging: the math](#noise-averaging-the-math)
+   - [The underexposure strategy](#the-underexposure-strategy)
+   - [Auto-exposure](#auto-exposure-how-google-decides-how-much-to-underexpose)
+6. [Capturing an HDR video](#capturing-an-hdr-video)
+   - [What ISO actually is](#what-iso-actually-is)
+   - [ARRI's solution: large photosites and dual gain readout](#arris-solution-large-photosites-and-dual-gain-readout)
+   - [How this reaches 17 stops](#how-this-reaches-17-stops)
+7. [Resources](#resources)
+
+---
+
+## How camers work?
+At each pixel within a camera, light arrives as a stream of photons. This photon flux hits a silicon photodiode, and each absorbed photon frees an electron inside the silicon, generating charge. These electrons collect in a potential well, where they're converted to a voltage, and that voltage is then quantized and stored. There are noises and optimizations at every stage, but this is the crux of how a camera captures scene information — and it's essentially what your .raw file contains.
+
+![photons](blog_imgs/photons2electrons.png)
+
+![potential_well](blog_imgs/potential_well.png)
 
 The potential well is the heart of it. Every photosite can hold only so many electrons before it's full — that ceiling is its capacity. Two controls decide how much light lands in the well, and therefore how full it gets. The aperture is the lens opening, set by the f-number: a smaller f-number means a wider opening and more light. The shutter speed is how long the sensor is allowed to collect light: long for dark scenes like astrophotography, very short to freeze fast motion.
 
@@ -17,7 +39,7 @@ That limit has a name — dynamic range. It's the ratio between the brightest li
 The dynamic range of a camera is defined as 
 
 $$
-20 \log \frac{B_{max}}{B_{min}} 
+\log_{2} \frac{B_{max}}{B_{min}} 
 $$
 
 B_max is the saturation point from the diagram above, and B_min is the noise floor. The wider this ratio, the bigger the band of brightness a camera can hold in one shot (you'll also see it quoted in "stops," where each stop is one EV — a doubling of light). When a scene's range of light is wider than the camera's dynamic range, something has to give, and that "something" is exactly the blown highlights or crushed shadows from before.
@@ -27,42 +49,169 @@ The sun hits around 100,000 cd/m² (candelas per square metre — the unit of lu
 ![img](blog_imgs/dynamic_range1.jpeg)
 
 
------------- 
+## The low-light problem on mobile cameras
 
-[Need editing from here]
+Before jumping to HDR solutions, it helps to understand a constraint specific to smartphone cameras: they have small pixels.
 
-## Capturing an HDR image
+A typical smartphone photosite is around 1–1.5 µm across. A full-frame DSLR photosite is 4–8 µm. Area scales as the square, so a smartphone well holds roughly 10–40× fewer electrons at saturation. That shrinks B_max considerably. But the more painful effect is in low light.
 
-my iphone 13 mini has EV settings from -2 to 2 and roughly the following is what it means. It can capture 10 stops of light at a time and we can slide through it  by setting different EV values. So one of the way to capture this high dynamic range is to capture images with different EV values and then merge them into one frame. [Debevec](https://www.cs.princeton.edu/courses/archive/fall14/cos526/papers/debevec97.pdf) is one of the first person to do it. The paper published in 1998, finds inverse camera response function to map output 8 bit image values to scene radiance values. Then using a weighted average they combine all the images into single HDR scene radiance. detailed notebook on the approach is [here](debevec.ipynb)
+When photons arrive at a photosite, the process of converting them to electrons is inherently random — each photon has a probability of being absorbed. This randomness follows a Poisson distribution. If the true expected signal is $S$ electrons, the actual count fluctuates with a standard deviation of $\sqrt{S}$. This is called **photon shot noise**, and it is a physical limit you cannot engineer away.
+
+The single-frame SNR from shot noise alone is:
+
+$$
+\text{SNR} = \frac{S}{\sqrt{S}} = \sqrt{S}
+$$
+
+In good light, $S$ is large (the well is mostly full) and SNR is high. In dim light, $S$ is small — and SNR collapses. A pixel collecting 4 electrons has SNR = 2. A pixel collecting 100 electrons has SNR = 10. Doubling your light (one stop) only improves SNR by $\sqrt{2} \approx 1.4\times$.
+
+The obvious hardware fix is a wider aperture — more photons per unit time. But a smartphone is thickness-constrained. You cannot make the lens meaningfully faster. The next option is a longer shutter — but that introduces motion blur for handheld or action shots. Small pixels, physics, and form factor together create the low-light noise problem that no single-exposure pipeline can cleanly escape.
+
+## Capturing an HDR image: Debevec's approach
+
+My iPhone 13 mini has EV settings from -2 to 2, meaning it can slide through about 10 stops of dynamic range by adjusting exposure. One approach to capturing a scene wider than 10 stops is to shoot the same scene multiple times at different EVs — short exposure for the highlights, long exposure for the shadows — and merge them into a single radiance map.
+
+[Debevec & Malik (1997)](https://www.cs.princeton.edu/courses/archive/fall14/cos526/papers/debevec97.pdf) were among the first to formalise this. Their method recovers the inverse camera response function — the mapping from 8-bit output values back to physical scene radiance — and then uses a weighted average across exposures so that each region of the image is contributed mostly by the frame where it was best exposed (not clipped, not in noise). The result is a linear HDR radiance map of the scene.
+
+**Where Debevec fails.** The approach assumes the scene is static between exposures. In practice it never is. A person walks through the frame, a leaf moves, a car passes. Because the short-exposure and long-exposure frames capture the scene at different moments, the same object appears in slightly different positions in each frame. When you merge them, you get **ghosting** — semi-transparent duplicates of anything that moved. Optical flow can partially correct this but it's expensive, often wrong on thin structures, and breaks down near occlusions. For a camera that needs to respond in under four seconds and run on a phone, Debevec's pipeline is too fragile.
+
+## Google HDR+: burst photography at constant EV
+
+Google's approach, published as [HDR+](https://static.googleusercontent.com/media/hdrplusdata.org/en//hdrplus.pdf), sidesteps the ghosting problem entirely by **never using different exposures**. The entire burst is shot at a single constant EV. This means all frames look the same to an alignment algorithm — no brightness discontinuities between frames — so alignment is robust even with subject motion. The motion ghosting problem disappears.
+
+But if all frames are the same exposure, where does the dynamic range come from?
+
+### Noise averaging: the math
+
+Model a single pixel across N frames:
+
+$$
+\text{pixel}_i = S + n_i
+$$
+
+where $S$ is the true scene signal (constant across frames — the scene is the same) and $n_i$ is independent noise on frame $i$ with mean 0 and variance $\sigma^2$.
+
+When you sum (or average) the N frames, signal and noise behave differently:
+
+$$
+\text{sum} = N \cdot S \; + \; \underbrace{(n_1 + n_2 + \cdots + n_N)}_{\text{noise sum}}
+$$
+
+Because noise terms are independent, **variances add**:
+
+$$
+\text{Var}(\text{noise sum}) = N\sigma^2 \implies \text{std dev} = \sigma\sqrt{N}
+$$
+
+Signal grew by $N$. Noise standard deviation grew by only $\sqrt{N}$. The SNR after merging:
+
+$$
+\text{SNR}_N = \frac{N \cdot S}{\sigma \sqrt{N}} = \sqrt{N} \cdot \frac{S}{\sigma}
+$$
+
+Merging N frames improves SNR by $\sqrt{N}$. Every 4× as many frames buys one extra stop of shadow you can recover. Google's pipeline merges 8–16 frames depending on scene brightness, giving 1.5–2 stops of effective noise floor reduction.
+
+In the dynamic range formula this is a direct reduction of $B_{min}$:
+
+$$
+\Delta DR = \frac{1}{2}\log_2(N) \text{ stops}
+$$
+
+For $N = 16$: $\Delta DR = 2$ stops of extra shadow detail, recovered through computation rather than hardware.
+
+### The underexposure strategy
+
+HDR+ doesn't just merge at any exposure — it intentionally **underexposes** the burst to protect highlights. Setting the shutter short enough that the sky doesn't blow out means the shadows are darker and noisier than they'd otherwise be. But the burst merge cleans up those shadows. The result is a merged image with clean shadows (thanks to averaging) and intact highlights (thanks to underexposure) — spanning a wider luminance range than any single frame could hold.
+
+This is the reframe: Google treats HDR capture as a **denoising problem**, not an exposure-bracketing problem. The dynamic range gain comes from lowering $B_{min}$, not from raising $B_{max}$.
+
+After merging, the pipeline creates two virtual exposures from the single merged image — the underexposed version for highlights, and a digitally brightened version for shadows — and fuses them with local tone mapping. The shadows, now clean from merging, can be safely brightened without amplifying noise into visibility.
+
+### Auto-exposure: how Google decides how much to underexpose
+
+The remaining question is how much to underexpose. Too little and highlights clip. Too much and even 16 merged frames are too noisy in shadows. The paper caps the maximum dynamic range compression at **8× (3 stops)** — beyond that, the local tone mapping starts to look unnatural.
+
+Within that cap, the exposure level is set by a **data-driven policy** trained on thousands of real scenes. The key insight is that the right answer is scene-dependent:
+
+- In a daylight landscape, you can let the sun blow out — a white disc in the sky is expected and acceptable.
+- In a beach sunset, the sun must stay coloured — any clipping there destroys the shot.
+- A concert stage with a dark audience requires different shadow recovery than a snow scene.
+
+The auto-exposure model learns these scene priors from a large image dataset, then applies them at capture time from a low-resolution preview frame. It outputs two numbers: the exposure to actually use (how short to set the shutter) and the synthetic gain to apply in post (how much to brighten shadows in tone mapping). These two are coupled — more underexposure means more post-processing brightening is needed, and the model learns to keep the combination within the range where the merged result looks natural.
+
+The practical result: a user pointing a Pixel phone at a candle-lit room, a noon beach, or a neon-lit bar all get a correctly exposed result automatically, without understanding any of this.
 
 
-Google launched [burst photography](https://static.googleusercontent.com/media/hdrplusdata.org/en//hdrplus.pdf) for obtaining high dynamic range. This is integrated into the camera ISP, so u don't need inverse CRF, we capture a burst of images from raw images 
+## Capturing an HDR video
 
-## HDR to SDR image
+Still images have a luxury that video doesn't: time. Debevec could bracket across three separate shots. Google could stack sixteen frames from a burst. Neither of those are options when you're shooting at 24 fps.
 
-In the latest imaging pipelines once an HDR image is captured the camera automatically does demosaicing, white balance and noise removal. Tone mapping is done and then content is moved to different formats 
+At 24 fps you have **40 ms per frame** — that's your entire budget for capture, readout, and moving on. You cannot expose the same frame twice at different moments; by the time you've finished the first exposure, the scene has changed. A hand has moved. A leaf has shifted. The frame is gone. Any technique that requires temporal separation of exposures produces ghosting, and ghosting in video is unwatchable.
 
-![sdr2hdr](blog_imgs/hdr2sdr.png)
+The problem then becomes: how do you capture 17+ stops of dynamic range from a single 40 ms window?
 
-- **sRGB / JPEG (for display)** — applies a gamma ~2.2 curve. This is designed to match how CRT displays worked historically and happens to roughly match human perceptual sensitivity. Compresses 12+ stops into 8 bits
-- **Log formats (S-Log3, LogC3, C-Log)** — for cinematographers — this is where your question lands. The fundamental insight is that human vision perceives brightness logarithmically — one stop of light (doubling of radiance) feels like roughly the same perceptual step whether you're in shadows or highlights. So log encoding maps each stop of scene radiance to roughly equal code values. The result is that:
-    - Shadows get more bits allocated (they'd otherwise be crushed)
-    - Highlights retain detail instead of clipping
-    - A colorist can re-expose, lift shadows, or pull highlights in post without destroying quality
+### What ISO actually is
 
-S-Log3 (Sony), LogC3 (ARRI — the one in the LumiVid paper), C-Log (Canon) are all variations of this idea, each tuned to their camera's specific sensor dynamic range and color science.
+To understand ARRI's solution you first need to understand what ISO does at the hardware level, because the solution is built around manipulating it.
 
-**PQ / HLG (for HDR displays)** — these are perceptual encodings standardized for HDR TVs and phones, designed to match the absolute luminance the human visual system can perceive from a display.
+After photons hit the photosite and electrons accumulate in the potential well, the charge is converted to a voltage and sent to an **amplifier** before it reaches the analog-to-digital converter (ADC). ISO is the gain setting of that amplifier.
 
+$$
+V_{out} = G \cdot V_{well}
+$$
 
+where $G$ is the gain factor controlled by ISO, and $V_{well}$ is the voltage coming off the potential well.
 
-## SDR to HDR image. 
-Now that we understand the entire pipeline of how an HDR image is captured and how it is toned down to 
+- **Low ISO (low gain, $G$ small):** The amplifier barely touches the signal. A well full of electrons produces a large output voltage; a well with a few electrons produces a tiny one. Highlights are safe — the amplifier won't clip them. But deep shadows, which produce only millivolts off the well, come out below the noise floor of the ADC and vanish. The sensor captures a large luminance range but the bottom of it is lost to quantisation noise.
 
+- **High ISO (high gain, $G$ large):** The amplifier boosts everything strongly. A well with a few shadow electrons now produces a large enough voltage to be cleanly digitised. Shadows become visible. But the same gain applied to a bright pixel — already producing a large well voltage — pushes the amplifier into saturation and clips the highlights. You've traded your highlight headroom for shadow sensitivity.
 
-## Why HDR now?
+![iso](blog_imgs/iso.png)
 
+The tradeoff is symmetric and inescapable with a single amplifier: you can shift the dynamic range window up or down with ISO, but you cannot make it wider. The width is fixed by the ratio of amplifier saturation to ADC noise floor.
 
+### ARRI's solution: large photosites and dual gain readout
+
+ARRI's ALEV-4 sensor (used in the ALEXA 35) attacks both terms of the dynamic range equation simultaneously.
+
+**Large photosites** raise $B_{max}$. ARRI uses unusually large photosites compared to broadcast or consumer sensors. A larger photosite has a physically bigger potential well — it can hold more electrons before saturating. More electrons at saturation means a higher ceiling, which directly extends the top of the dynamic range.
+
+**Dual gain readout** is where the video HDR problem gets solved. Rather than one amplifier path per pixel, the ALEV-4 routes each pixel's well voltage into **two separate amplifier paths simultaneously**, within the same 40 ms frame window:
+
+```
+                ┌─ High-gain amplifier (G_H) ──► ADC ──► shadow channel
+potential well ─┤
+                └─ Low-gain amplifier (G_L) ──► ADC ──► highlight channel
+```
+
+Both reads happen at exactly the same instant, from the same accumulated charge in the well. There is no temporal gap — no ghosting is possible because neither read is "later" than the other.
+
+The two channels capture complementary halves of the luminance range:
+
+- **High-gain channel** ($G_H$ large): shadows are lifted above the noise floor and cleanly digitised. Midtones are clean. Highlights are clipped — the amplifier is saturated.
+- **Low-gain channel** ($G_L$ small): highlights are intact and unclipped. Midtones are present. Shadows are below the ADC noise floor and lost.
+
+The merge is then straightforward: for each pixel, use the high-gain reading for any luminance value where the high-gain channel hasn't clipped, and switch to the low-gain reading for anything above that threshold.
+
+$$
+\text{pixel}_{merged} = \begin{cases} \dfrac{V_H}{G_H} & \text{if } V_H < V_{clip} \\ \dfrac{V_L}{G_L} & \text{if } V_H \geq V_{clip} \end{cases}
+$$
+
+Both channels are expressed in the same units (electrons, or equivalently, scene radiance) by dividing out the respective gains. At the crossover point they represent the same physical signal, so the merge is seamless.
+
+### How this reaches 17 stops
+
+Say the gain ratio between the two channels is $k = G_H / G_L$. Each channel individually captures roughly the same number of stops of dynamic range — call it $D$ stops. But they cover different parts of the luminance scale, offset by $\log_2(k)$ stops. The merged result covers:
+
+$$
+DR_{merged} \approx D + \log_2(k) \text{ stops}
+$$
+
+ARRI tunes the gain ratio so the two windows overlap slightly in the midtones (ensuring a clean crossover region) while the combined span reaches approximately 17 stops. The large photosites contribute by pushing $D$ higher on their own — a bigger well means the high-gain channel alone already has excellent shadow sensitivity before the low-gain channel extends the top.
+
+The result is a sensor that delivers 17 stops of dynamic range from a single frame, at any frame rate, with no temporal artifacts — something no single-amplifier sensor can approach regardless of how carefully you set the ISO.
 
 ## Resources 
-[Burst Photography for High Dynamic Range and Low-Light Imaging on Mobile Cameras](https://static.googleusercontent.com/media/hdrplusdata.org/en//hdrplus.pdf)
+- [Debevec & Malik (1997)](https://www.cs.princeton.edu/courses/archive/fall14/cos526/papers/debevec97.pdf)
+- [Burst Photography for High Dynamic Range and Low-Light Imaging on Mobile Cameras](https://static.googleusercontent.com/media/hdrplusdata.org/en//hdrplus.pdf)
+- [How camera ISO works](https://www.youtube.com/watch?v=iiMfAmWbWSg)
