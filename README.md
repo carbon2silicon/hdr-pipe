@@ -12,4 +12,4 @@ A blog post tracing HDR imaging from first principles — how a camera photosite
 4. The low-light problem on mobile — small pixels, shot noise, and why hardware alone can't fix it
 5. Debevec's approach — multi-exposure bracketing and why ghosting kills it
 6. Google HDR+ — burst photography at constant EV, noise averaging math, and the underexposure strategy
-7. Capturing HDR video — ARRI's dual-gain readout and how the ALEXA 35 reaches 17 stops in a single frame
+7. Capturing HDR video — dual-gain readout and how the high end cameras reaches 17 stops in a single frame

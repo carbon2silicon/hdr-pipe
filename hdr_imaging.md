@@ -13,7 +13,7 @@ A modern camera can't capture a sunlit street and a shadowed alley in the same f
    - [The underexposure strategy](#the-underexposure-strategy)
    - [Auto-exposure](#auto-exposure-how-google-decides-how-much-to-underexpose)
 7. [Capturing an HDR video](#capturing-an-hdr-video)
-   - [ARRI's solution: large photosites and dual gain readout](#arris-solution-large-photosites-and-dual-gain-readout)
+   - [Dual-gain readout: the hardware solution](#dual-gain-readout-the-hardware-solution)
    - [How this reaches 17 stops](#how-this-reaches-17-stops)
 8. [Resources](#resources)
 
@@ -170,7 +170,7 @@ The problem then becomes: how do you capture 17+ stops of dynamic range from a s
 
 ### What ISO actually is at the hardware level
 
-We introduced ISO as electronic gain applied after readout. To understand ARRI's solution, we need to go one level deeper — into exactly what that amplifier does, and why you can't simply turn it up to capture everything.
+We introduced ISO as electronic gain applied after readout. To understand how cinema sensors solve this, we need to go one level deeper — into exactly what that amplifier does, and why you can't simply turn it up to capture everything.
 
 After photons hit the photosite and electrons accumulate in the potential well, the charge is converted to a voltage and sent to an **amplifier** before it reaches the analog-to-digital converter (ADC). ISO is the gain setting of that amplifier.
 
@@ -188,19 +188,15 @@ where $G$ is the gain factor controlled by ISO, and $V_{well}$ is the voltage co
 
 The tradeoff is symmetric and inescapable with a single amplifier: you can shift the dynamic range window up or down with ISO, but you cannot make it wider. The width is fixed by the ratio of amplifier saturation to ADC noise floor.
 
-### ARRI's solution: large photosites and dual gain readout
+### Dual-gain readout: the hardware solution
 
-ARRI's ALEV-4 sensor (used in the ALEXA 35) attacks both terms of the dynamic range equation simultaneously.
+The technique that breaks the single-amplifier deadlock is called **dual conversion gain** — documented in CMOS sensor literature and implemented across high-end cinema image sensors. It attacks both terms of the dynamic range equation simultaneously.
 
-**Large photosites** raise $B_{max}$. ARRI uses unusually large photosites compared to broadcast or consumer sensors. A larger photosite has a physically bigger potential well — it can hold more electrons before saturating. More electrons at saturation means a higher ceiling, which directly extends the top of the dynamic range.
+**Large photosites** raise $B_{max}$. Cinema sensors use physically larger photosites than consumer or broadcast sensors. A larger photosite has a bigger potential well — it holds more electrons before saturating, which directly extends the top of the dynamic range.
 
-**Dual gain readout** is where the video HDR problem gets solved. Rather than one amplifier path per pixel, the ALEV-4 routes each pixel's well voltage into **two separate amplifier paths simultaneously**, within the same 40 ms frame window:
+**Dual gain readout** is where the video HDR problem gets solved. Rather than one amplifier path per pixel, each pixel's well voltage is routed into **two separate amplifier paths simultaneously**, within the same 40 ms frame window:
 
-```
-                ┌─ High-gain amplifier (G_H) ──► ADC ──► shadow channel
-potential well ─┤
-                └─ Low-gain amplifier (G_L) ──► ADC ──► highlight channel
-```
+![dual-gain-readout](blog_imgs/arri.png)
 
 Both reads happen at exactly the same instant, from the same accumulated charge in the well. There is no temporal gap — no ghosting is possible because neither read is "later" than the other.
 
@@ -217,7 +213,7 @@ $$
 
 Both channels are expressed in the same units (electrons, or equivalently, scene radiance) by dividing out the respective gains. At the crossover point they represent the same physical signal, so the merge is seamless.
 
-### How this reaches 17 stops
+### How this extends dynamic range
 
 Say the gain ratio between the two channels is $k = G_H / G_L$. Each channel individually captures roughly the same number of stops of dynamic range — call it $D$ stops. But they cover different parts of the luminance scale, offset by $\log_2(k)$ stops. The merged result covers:
 
@@ -225,9 +221,9 @@ $$
 DR_{merged} \approx D + \log_2(k) \text{ stops}
 $$
 
-ARRI tunes the gain ratio so the two windows overlap slightly in the midtones (ensuring a clean crossover region) while the combined span reaches approximately 17 stops. The large photosites contribute by pushing $D$ higher on their own — a bigger well means the high-gain channel alone already has excellent shadow sensitivity before the low-gain channel extends the top.
+The gain ratio is tuned so the two windows overlap slightly in the midtones — ensuring a clean crossover — while the combined span pushes well beyond what either channel alone can hold. The large photosites contribute by raising $D$ independently: a bigger well means the high-gain channel alone already has excellent shadow sensitivity before the low-gain channel extends the top.
 
-The result is a sensor that delivers 17 stops of dynamic range from a single frame, at any frame rate, with no temporal artifacts — something no single-amplifier sensor can approach regardless of how carefully you set the ISO.
+The result is a sensor that captures 14–17 stops of dynamic range from a single frame, at any frame rate, with no temporal artifacts — something no single-amplifier sensor can approach regardless of how carefully you set the ISO.
 
 ## Resources 
 - [Debevec & Malik (1997)](https://www.cs.princeton.edu/courses/archive/fall14/cos526/papers/debevec97.pdf)
