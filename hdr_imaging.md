@@ -1,6 +1,6 @@
 # How HDR images and videos are captured
 
-A modern camera can't capture a sunlit street and a shadowed alley in the same frame — the physics won't allow it. High Dynamic Range (HDR) imaging is the set of techniques, from sensor design to software, that work around that limit. This post traces the problem from first principles — how a photosite works, why dynamic range is finite, and why small pixels make it worse — then walks through three distinct engineering solutions: Debevec's multi-exposure bracketing, Google's burst-merge approach in HDR+, and ARRI's dual-gain sensor for video.
+A modern camera can't capture a sunlit street and a shadowed alley in the same frame — the physics won't allow it. High Dynamic Range (HDR) imaging is the set of techniques, from sensor design to software, that work around that limit. This post traces the problem from first principles — how a photosite works, why dynamic range is finite, and why small pixels make it worse — then walks through three distinct engineering solutions: Debevec's multi-exposure bracketing, Google's burst-merge approach in HDR+, and cinema cameras dual-gain sensor for video.
 
 ## Sections
 1. [How cameras work](#how-cameras-work)
